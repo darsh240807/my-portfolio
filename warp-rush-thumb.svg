@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a0320"/>
+      <stop offset="0.5" stop-color="#120636"/>
+      <stop offset="1" stop-color="#05010f"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.5" stop-color="#a97bff"/>
+      <stop offset="1" stop-color="#a97bff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="300" height="200" fill="url(#bg)"/>
+  <!-- perspective grid -->
+  <g stroke="#7a3ce0" stroke-opacity="0.28" stroke-width="1">
+    <line x1="150" y1="100" x2="-120" y2="200"/>
+    <line x1="150" y1="100" x2="20" y2="200"/>
+    <line x1="150" y1="100" x2="90" y2="200"/>
+    <line x1="150" y1="100" x2="150" y2="200"/>
+    <line x1="150" y1="100" x2="210" y2="200"/>
+    <line x1="150" y1="100" x2="280" y2="200"/>
+    <line x1="150" y1="100" x2="420" y2="200"/>
+    <line x1="0" y1="130" x2="300" y2="130"/>
+    <line x1="0" y1="165" x2="300" y2="165"/>
+  </g>
+  <!-- obstacles -->
+  <g fill="#0a041a" stroke="#ff4f9a" stroke-width="2">
+    <rect x="215" y="0" width="26" height="70" rx="5"/>
+    <rect x="215" y="130" width="26" height="70" rx="5"/>
+  </g>
+  <g fill="#0a041a" stroke="#4fe0ff" stroke-width="2">
+    <rect x="265" y="30" width="24" height="90" rx="5"/>
+  </g>
+  <!-- orb -->
+  <circle cx="180" cy="70" r="7" fill="#ffe08a"/>
+  <!-- player trail -->
+  <circle cx="60" cy="96" r="4" fill="#a97bff" opacity="0.35"/>
+  <circle cx="78" cy="98" r="6" fill="#a97bff" opacity="0.5"/>
+  <circle cx="100" cy="100" r="30" fill="url(#core)"/>
+  <circle cx="100" cy="100" r="12" fill="#a97bff"/>
+  <circle cx="100" cy="100" r="6" fill="#ffffff"/>
+  <!-- title -->
+  <text x="16" y="30" font-family="Courier New, monospace" font-size="13" font-weight="bold" fill="#c9b8ff" letter-spacing="1">WARP RUSH</text>
+  <text x="16" y="46" font-family="Courier New, monospace" font-size="8" fill="#7a6aaa" letter-spacing="1">CLAUDE × HIGGSFIELD</text>
+</svg>
