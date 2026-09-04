@@ -264,15 +264,19 @@
   // ---------------- character factory ----------------
   function makePerson(skin, shirt, pants) {
     const g = new T.Group();
-    const torso = addShadow(box(0.7, 0.8, 0.4, shirt)); torso.position.y = 1.25; g.add(torso);
+    // limb: geometry translated so it hangs DOWN from its pivot (top of the box)
+    function limb(w, h, d, color, px, py) {
+      const m = addShadow(box(w, h, d, color));
+      m.geometry.translate(0, -h / 2, 0);   // pivot at top -> box hangs below
+      m.position.set(px, py, 0);
+      g.add(m); return m;
+    }
+    const legL = limb(0.26, 0.9, 0.26, pants, -0.18, 0.9);   // hip at 0.9, feet at 0
+    const legR = limb(0.26, 0.9, 0.26, pants, 0.18, 0.9);
+    const torso = addShadow(box(0.7, 0.8, 0.4, shirt)); torso.position.y = 1.3; g.add(torso);
+    const armL = limb(0.2, 0.7, 0.2, shirt, -0.46, 1.62);    // shoulders, arms hang down
+    const armR = limb(0.2, 0.7, 0.2, shirt, 0.46, 1.62);
     const head = addShadow(box(0.5, 0.5, 0.5, skin)); head.position.y = 1.95; g.add(head);
-    const legL = addShadow(box(0.26, 0.75, 0.26, pants)); legL.position.set(-0.18, 0.42, 0); legL.geometry.translate(0, 0.375, 0); legL.position.y = 0.42 - 0.375 + 0.75; g.add(legL);
-    const legR = legL.clone(); legR.position.x = 0.18; g.add(legR);
-    const armL = addShadow(box(0.2, 0.7, 0.2, shirt)); armL.geometry.translate(0, 0.35, 0); armL.position.set(-0.46, 1.6 - 0.35, 0); g.add(armL);
-    const armR = armL.clone(); armR.position.x = 0.46; g.add(armR);
-    // reposition legs so they pivot at the hip
-    legL.position.set(-0.18, 1.15, 0); legR.position.set(0.18, 1.15, 0);
-    armL.position.set(-0.46, 1.6, 0); armR.position.set(0.46, 1.6, 0);
     return { g, legL, legR, armL, armR, phase: Math.random() * 6 };
   }
   function animatePerson(p, moving, dt) {
