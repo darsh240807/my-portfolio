@@ -2488,27 +2488,40 @@
   makeBench(9, 8, -0.4); makeBench(-9, -8, 2.6); makeBench(9, -8, 3.5); makeBench(-9, 8, 0.6);
 
   // ---------------- people ----------------
-  function makePerson(skin, shirt, pants, hair) {
+  function makePerson(skin, shirt, pants, hair, isPlayer) {
     const g = new T.Group();
-    const sMat = new T.MeshStandardMaterial({ color: skin, roughness: 0.85, flatShading: true });
-    const shMat = new T.MeshStandardMaterial({ color: shirt, roughness: 0.8, flatShading: true });
-    const pMat = new T.MeshStandardMaterial({ color: pants, roughness: 0.85, flatShading: true });
-    function limb(w, h, d, mat, px, py) { const m = shad(new T.Mesh(new T.BoxGeometry(w, h, d), mat)); m.geometry.translate(0, -h/2, 0); m.position.set(px, py, 0); g.add(m); return m; }
-    const legL = limb(0.26, 0.9, 0.26, pMat, -0.18, 0.9);
-    const legR = limb(0.26, 0.9, 0.26, pMat, 0.18, 0.9);
-    const torso = shad(new T.Mesh(new T.BoxGeometry(0.72, 0.82, 0.42), shMat)); torso.position.y = 1.31; g.add(torso);
-    const armL = limb(0.2, 0.72, 0.2, shMat, -0.47, 1.63);
-    const armR = limb(0.2, 0.72, 0.2, shMat, 0.47, 1.63);
-    const head = shad(new T.Mesh(new T.BoxGeometry(0.5, 0.5, 0.5), sMat)); head.position.y = 1.97; g.add(head);
-    const hr = shad(new T.Mesh(new T.BoxGeometry(0.54, 0.2, 0.54), new T.MeshStandardMaterial({ color: hair, roughness: 0.9, flatShading: true }))); hr.position.y = 2.2; g.add(hr);
+    const M = (c, r) => new T.MeshStandardMaterial({ color: c, roughness: r == null ? 0.62 : r, metalness: 0 });
+    const sMat = M(skin, 0.6), shMat = M(shirt, 0.68), pMat = M(pants, 0.7), hMat = M(hair, 0.78);
+    // limb: group pivoting at top; tapered cylinder + rounded joint & end
+    function limb(rad, len, mat, endMat) {
+      const grp = new T.Group();
+      const cyl = shad(new T.Mesh(new T.CylinderGeometry(rad, rad * 0.88, len, 10), mat)); cyl.position.y = -len/2; grp.add(cyl);
+      const top = shad(new T.Mesh(new T.SphereGeometry(rad, 10, 8), mat)); grp.add(top);
+      const end = shad(new T.Mesh(new T.SphereGeometry(rad * 0.92, 10, 8), endMat || mat)); end.position.y = -len; grp.add(end);
+      return grp;
+    }
+    const legL = limb(0.14, 0.9, pMat, pMat); legL.position.set(-0.17, 0.95, 0); g.add(legL);
+    const legR = limb(0.14, 0.9, pMat, pMat); legR.position.set(0.17, 0.95, 0); g.add(legR);
+    function foot(p) { const f = shad(new T.Mesh(new T.BoxGeometry(0.2, 0.14, 0.34), M(0x2a2a30, 0.6))); f.position.set(0, -0.9, 0.07); p.add(f); }
+    foot(legL); foot(legR);
+    const hips = shad(new T.Mesh(new T.SphereGeometry(0.28, 14, 10), pMat)); hips.position.y = 0.98; hips.scale.set(1, 0.72, 0.9); g.add(hips);
+    const torso = shad(new T.Mesh(new T.CylinderGeometry(0.33, 0.27, 0.6, 14), shMat)); torso.position.y = 1.28; g.add(torso);
+    const chest = shad(new T.Mesh(new T.SphereGeometry(0.33, 16, 12), shMat)); chest.position.y = 1.56; chest.scale.set(1, 0.68, 0.86); g.add(chest);
+    const armL = limb(0.1, 0.6, shMat, sMat); armL.position.set(-0.4, 1.54, 0); g.add(armL);
+    const armR = limb(0.1, 0.6, shMat, sMat); armR.position.set(0.4, 1.54, 0); g.add(armR);
+    const neck = shad(new T.Mesh(new T.CylinderGeometry(0.11, 0.11, 0.12, 8), sMat)); neck.position.y = 1.72; g.add(neck);
+    const head = shad(new T.Mesh(new T.SphereGeometry(0.28, 18, 14), sMat)); head.position.y = 1.96; head.scale.set(1, 1.06, 1); g.add(head);
+    const hairMesh = shad(new T.Mesh(new T.SphereGeometry(0.3, 18, 14, 0, Math.PI*2, 0, Math.PI*0.62), hMat)); hairMesh.position.y = 1.98; g.add(hairMesh);
+    for (const ex of [-0.1, 0.1]) { const eye = new T.Mesh(new T.SphereGeometry(0.04, 8, 8), new T.MeshStandardMaterial({ color: 0x1a1a22, roughness: 0.4 })); eye.position.set(ex, 1.99, 0.25); g.add(eye); }
+    if (isPlayer) { const bp = shad(new T.Mesh(new T.BoxGeometry(0.44, 0.52, 0.22), M(0xe23b5b, 0.7))); bp.position.set(0, 1.3, -0.33); g.add(bp); }
     return { g, legL, legR, armL, armR, phase: Math.random()*6 };
   }
   function animate(p, moving, dt) {
-    p.phase += dt * (moving ? 10 : 2);
-    const s = Math.sin(p.phase) * (moving ? 0.7 : 0.05);
+    p.phase += dt * (moving ? 9 : 2);
+    const s = Math.sin(p.phase) * (moving ? 0.62 : 0.04);
     p.legL.rotation.x = s; p.legR.rotation.x = -s; p.armL.rotation.x = -s; p.armR.rotation.x = s;
   }
-  const player = makePerson(0xf0c090, 0x2f6df0, 0x27324a, 0x2a2018);
+  const player = makePerson(0xf0c090, 0x2f6df0, 0x27324a, 0x2a2018, true);
   scene.add(player.g);
   const pos = new T.Vector3(0, 0, 12);
   let facing = Math.PI;
@@ -2523,6 +2536,14 @@
     scene.add(p.g); npcs.push(p);
   }
   function randTarget() { let x,z,t=0; do { x=(Math.random()*2-1)*40; z=(Math.random()*2-1)*40; t++; } while (nearSolid(x,z,2) && t<10); return new T.Vector3(x,0,z); }
+
+  // ---------------- atmospheric dust motes ----------------
+  const dustGeo = new T.BufferGeometry();
+  const DN = 340, darr = new Float32Array(DN * 3);
+  for (let i = 0; i < DN; i++) { darr[i*3] = (Math.random()*2-1)*60; darr[i*3+1] = Math.random()*22; darr[i*3+2] = (Math.random()*2-1)*60; }
+  dustGeo.setAttribute("position", new T.BufferAttribute(darr, 3));
+  const dust = new T.Points(dustGeo, new T.PointsMaterial({ color: 0xfff4d0, size: 0.09, transparent: true, opacity: 0.5, depthWrite: false, blending: T.AdditiveBlending }));
+  scene.add(dust);
 
   // ---------------- camera ----------------
   let camYaw = Math.PI, camPitch = 0.42, camDist = 11;
@@ -2625,6 +2646,7 @@
       animate(n, dd >= 1, dt);
     }
     for (const c of clouds) { c.position.x += dt * 1.2; if (c.position.x > 170) c.position.x = -170; }
+    dust.rotation.y += dt * 0.03; dust.position.y = Math.sin(clock.elapsedTime * 0.2) * 0.5;
 
     nearB = null; let best = 6;
     for (const b of buildings) { const dx = Math.max(Math.abs(pos.x-b.x)-b.hx,0), dz = Math.max(Math.abs(pos.z-b.z)-b.hz,0), dd = Math.hypot(dx,dz); if (dd<best){best=dd;nearB=b;} }
