@@ -27,7 +27,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="c"></canvas></div>
-<div id="hint">SPACE / CLICK / TAP · flip gravity&nbsp;&nbsp;·&nbsp;&nbsp;SHIFT / 2-FINGER · WARP&nbsp;&nbsp;·&nbsp;&nbsp;P · pause&nbsp;&nbsp;·&nbsp;&nbsp;M · mute</div>
+<div id="hint">SPACE / CLICK / TAP · flap&nbsp;&nbsp;·&nbsp;&nbsp;SHIFT / 2-FINGER · WARP&nbsp;&nbsp;·&nbsp;&nbsp;P · pause&nbsp;&nbsp;·&nbsp;&nbsp;M · mute</div>
 <script>
 (() => {
   "use strict";
@@ -109,8 +109,8 @@
   let grace = 0, countdown = 0, lastCount = 4;
   let hasShield = false;
 
-  const GRAV = 1350;
-  const FLIP_KICK = 150;
+  const GRAV = 1500;
+  const FLAP = 430;   // upward impulse per tap (Flappy-style)
   const LANE_PAD = 66;
 
   function reset() {
@@ -157,11 +157,10 @@
     if (state === STATE.DEAD) { if (now() - deadAt > 550) reset(); return; }
     if (paused) return;
     if (countdown > 0) return;
-    player.gravDir *= -1;
-    player.vy = -player.gravDir * FLIP_KICK;
-    burst(player.x, player.y, `hsl(${hue},90%,65%)`, 9, 240, 0.5);
-    ring(player.x, player.y, `hsl(${hue},90%,70%)`, player.r, player.r + 42);
-    shake = Math.min(shake + 2.5, 12);
+    player.vy = -FLAP;   // flap: single upward impulse, gravity always pulls down
+    burst(player.x, player.y + player.r, `hsl(${hue},90%,65%)`, 7, 200, 0.45);
+    ring(player.x, player.y, `hsl(${hue},90%,70%)`, player.r, player.r + 34);
+    shake = Math.min(shake + 1.5, 8);
     S.flip();
   }
   function tryWarp() {
@@ -295,8 +294,8 @@
     dist += speed * g;
 
     // physics
-    player.vy += GRAV * player.gravDir * g;
-    player.vy = clamp(player.vy, -1500, 1500);
+    player.vy += GRAV * g;
+    player.vy = clamp(player.vy, -700, 1100);
     player.y += player.vy * g;
     const top = player.r + 4, bot = H - player.r - 4;
     if (player.y < top) { player.y = top; player.vy = 0; }
@@ -544,9 +543,11 @@
     ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, TAU); ctx.fill();
     ctx.shadowBlur = 0; ctx.fillStyle = "#ffffff";
     ctx.beginPath(); ctx.arc(player.x, player.y, player.r * 0.5, 0, TAU); ctx.fill();
-    ctx.strokeStyle = col; ctx.lineWidth = 3;
+    // little thruster flare pointing where velocity is taking it
+    const dir = player.vy < 0 ? -1 : 1;
+    ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.globalAlpha *= 0.8;
     ctx.beginPath(); ctx.moveTo(player.x, player.y);
-    ctx.lineTo(player.x, player.y + player.gravDir * (player.r + 10)); ctx.stroke();
+    ctx.lineTo(player.x, player.y + dir * (player.r + 8)); ctx.stroke();
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -611,7 +612,7 @@
     ctx.globalAlpha = pulse;
     txt("PRESS  SPACE  /  TAP  TO  START", cx, cy + 60, 20, "#c9b8ff", "center");
     ctx.globalAlpha = 1;
-    txt("flip gravity · grab gold orbs · grab ◈ shields · charge WARP", cx, cy + 98, 13, "#6a5a9a", "center");
+    txt("tap to flap · grab gold orbs · grab ◈ shields · charge WARP", cx, cy + 98, 13, "#6a5a9a", "center");
     txt("BEST  " + best, cx, cy + 126, 15, "#7a6aaa", "center");
     ctx.restore();
   }
