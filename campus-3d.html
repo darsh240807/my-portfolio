@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>CAMPUS LIFE — 3D Proof of Concept</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #12141c;
+    font-family: "Segoe UI", system-ui, sans-serif; color: #fff; -webkit-tap-highlight-color: transparent; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* top-left stats */
+  #stats { position: fixed; top: 12px; left: 12px; z-index: 10; width: 210px;
+    background: rgba(12,14,24,0.55); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 12px 14px; font-size: 12px; user-select: none; }
+  #stats .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  #stats .lbl { width: 54px; color: #b9c2d6; letter-spacing: .5px; }
+  #stats .bar { flex: 1; height: 8px; background: rgba(255,255,255,0.12); border-radius: 6px; overflow: hidden; }
+  #stats .fill { height: 100%; width: 50%; border-radius: 6px; transition: width .35s ease; }
+  #clock { font-size: 13px; font-weight: 700; margin-bottom: 4px; color: #ffd76a; letter-spacing: .5px; }
+
+  /* controls hint */
+  #hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+    background: rgba(12,14,24,0.5); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
+    padding: 8px 16px; font-size: 12px; color: #c7cfe0; letter-spacing: .5px; white-space: nowrap;
+    max-width: 96vw; overflow: hidden; text-overflow: ellipsis; }
+
+  /* interaction prompt */
+  #prompt { position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 11;
+    background: rgba(90,120,255,0.92); border-radius: 12px; padding: 10px 18px; font-size: 15px; font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; }
+  #prompt b { background: rgba(255,255,255,0.25); padding: 1px 8px; border-radius: 6px; margin: 0 2px; }
+
+  /* toast */
+  #toast { position: fixed; bottom: 108px; left: 50%; transform: translateX(-50%) translateY(10px); z-index: 12;
+    background: rgba(20,24,38,0.95); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px;
+    padding: 10px 16px; font-size: 13px; opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* building panel */
+  #panel { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+    background: rgba(6,8,16,0.72); backdrop-filter: blur(4px); }
+  #panel .card { width: min(420px, 90vw); background: #171b2b; border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 18px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+  #panel h2 { font-size: 24px; margin-bottom: 4px; }
+  #panel .sub { color: #9aa6c2; font-size: 13px; margin-bottom: 18px; }
+  #panel .act { display: block; width: 100%; text-align: left; margin: 8px 0; padding: 13px 16px;
+    background: #222842; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; color: #fff;
+    font-size: 15px; cursor: pointer; transition: background .15s, transform .1s; }
+  #panel .act:hover { background: #2e3860; transform: translateX(3px); }
+  #panel .act small { display: block; color: #8f9bbb; font-size: 12px; margin-top: 3px; }
+  #panel .close { margin-top: 14px; width: 100%; padding: 11px; background: transparent;
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #c7cfe0; cursor: pointer; font-size: 14px; }
+  #panel .close:hover { background: rgba(255,255,255,0.06); }
+
+  /* mobile joystick */
+  #stick { position: fixed; z-index: 15; width: 120px; height: 120px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.06); display: none; }
+  #stick .nub { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px;
+    border-radius: 50%; background: rgba(255,255,255,0.35); }
+
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 30;
+    background: #12141c; font-size: 16px; color: #8f9bbb; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="loading">Loading 3D campus…</div>
+
+<div id="stats">
+  <div id="clock">Day 1 · 08:00</div>
+  <div class="row"><span class="lbl">Energy</span><div class="bar"><div class="fill" id="f-energy" style="background:#4fd08a"></div></div></div>
+  <div class="row"><span class="lbl">Grades</span><div class="bar"><div class="fill" id="f-grades" style="background:#6aa8ff"></div></div></div>
+  <div class="row"><span class="lbl">Social</span><div class="bar"><div class="fill" id="f-social" style="background:#ff8ad0"></div></div></div>
+  <div class="row"><span class="lbl">Health</span><div class="bar"><div class="fill" id="f-health" style="background:#ff6a6a"></div></div></div>
+  <div class="row"><span class="lbl">Money</span><div class="bar"><div class="fill" id="f-money" style="background:#ffd76a"></div></div></div>
+</div>
+
+<div id="prompt"></div>
+<div id="toast"></div>
+<div id="hint">WASD / Arrows · move&nbsp;&nbsp;·&nbsp;&nbsp;Drag · look&nbsp;&nbsp;·&nbsp;&nbsp;Shift · run&nbsp;&nbsp;·&nbsp;&nbsp;E · enter building</div>
+
+<div id="stick"><div class="nub"></div></div>
+
+<div id="panel"><div class="card">
+  <h2 id="p-title">Building</h2>
+  <div class="sub" id="p-sub"></div>
+  <div id="p-acts"></div>
+  <button class="close" id="p-close">Leave</button>
+</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  "use strict";
+  if (!window.THREE) {
+    document.getElementById("loading").textContent = "Failed to load 3D engine (Three.js). Check your connection.";
+    return;
+  }
+  const T = window.THREE;
+
+  // ---------------- renderer / scene ----------------
+  const app = document.getElementById("app");
+  const renderer = new T.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = T.PCFSoftShadowMap;
+  app.appendChild(renderer.domElement);
+
+  const scene = new T.Scene();
+  scene.background = new T.Color(0x9fd3ff);
+  scene.fog = new T.Fog(0x9fd3ff, 60, 140);
+
+  const camera = new T.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+
+  // lights
+  scene.add(new T.AmbientLight(0xbfd4ff, 0.75));
+  const sun = new T.DirectionalLight(0xfff3d6, 1.15);
+  sun.position.set(40, 70, 30);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  const sc = sun.shadow.camera;
+  sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 1; sc.far = 200;
+  scene.add(sun);
+
+  // ---------------- helpers ----------------
+  const mat = (color, rough) => new T.MeshStandardMaterial({ color, roughness: rough == null ? 0.95 : rough, flatShading: true });
+  function box(w, h, d, color, rough) { return new T.Mesh(new T.BoxGeometry(w, h, d), mat(color, rough)); }
+  function addShadow(m) { m.castShadow = true; m.receiveShadow = true; return m; }
+
+  // ---------------- ground ----------------
+  const ground = new T.Mesh(new T.PlaneGeometry(300, 300), mat(0x6fbf5e, 1));
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // paths (a simple cross of walkways)
+  const pathMat = mat(0xbfb59a, 1);
+  function path(w, d, x, z) { const p = new T.Mesh(new T.PlaneGeometry(w, d), pathMat); p.rotation.x = -Math.PI/2; p.position.set(x, 0.02, z); p.receiveShadow = true; scene.add(p); }
+  path(8, 90, 0, 0);
+  path(90, 8, 0, 0);
+
+  // ---------------- buildings ----------------
+  const WORLD = 46; // half-size playable bound
+  const buildings = [];
+  function makeBuilding(name, sub, x, z, w, h, d, color, acts) {
+    const g = new T.Group();
+    const body = addShadow(box(w, h, d, color));
+    body.position.y = h / 2;
+    g.add(body);
+    // roof accent
+    const roof = addShadow(box(w + 0.6, 0.6, d + 0.6, 0x2c3350));
+    roof.position.y = h + 0.3; g.add(roof);
+    // door
+    const door = box(2, 2.4, 0.2, 0x3a2c1c);
+    door.position.set(0, 1.2, d / 2 + 0.1); g.add(door);
+    // windows
+    for (let i = -1; i <= 1; i++) {
+      const win = box(1.2, 1.2, 0.15, 0xcdeaff, 0.3);
+      win.position.set(i * (w / 3.4), h * 0.62, d / 2 + 0.08); g.add(win);
+    }
+    g.position.set(x, 0, z);
+    scene.add(g);
+    // floating label
+    g.add(makeLabel(name, h + 2));
+    buildings.push({ name, sub, x, z, hx: w / 2, hz: d / 2, acts });
+  }
+
+  function makeLabel(text, y) {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 64;
+    const cx = c.getContext("2d");
+    cx.fillStyle = "rgba(15,18,30,0.82)";
+    roundRectCtx(cx, 4, 8, 248, 44, 12); cx.fill();
+    cx.fillStyle = "#fff"; cx.font = "bold 28px Segoe UI, sans-serif";
+    cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText(text, 128, 32);
+    const tex = new T.CanvasTexture(c);
+    tex.anisotropy = 4;
+    const spr = new T.Sprite(new T.SpriteMaterial({ map: tex, depthTest: false }));
+    spr.scale.set(6, 1.5, 1); spr.position.y = y;
+    return spr;
+  }
+  function roundRectCtx(c, x, y, w, h, r) {
+    c.beginPath(); c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+  }
+
+  makeBuilding("Library", "Quiet. Smells like exam season.", -20, -16, 12, 9, 10, 0x9c7bd6, [
+    { t: "Study", d: "Grades +9, Energy −16 · 3h", f: () => act({ grades: 9, energy: -16 }, 3, "Hit the books. Grades up!") },
+    { t: "Group project", d: "Grades +5, Social +6, Energy −10 · 2h", f: () => act({ grades: 5, social: 6, energy: -10 }, 2, "Carried the group again.") },
+    { t: "Nap in a corner", d: "Energy +12 · 1h", f: () => act({ energy: 12 }, 1, "Sneaky library nap.") },
+  ]);
+  makeBuilding("Lecture Hall", "300 seats. You sit in the back.", 0, -28, 18, 8, 9, 0x5a86c9, [
+    { t: "Attend class", d: "Grades +7, Energy −12 · 2h", f: () => act({ grades: 7, energy: -12 }, 2, "Actually paid attention.") },
+    { t: "Skip & scroll", d: "Social +4, Grades −3 · 1h", f: () => act({ social: 4, grades: -3 }, 1, "Bunked. No regrets… yet.") },
+  ]);
+  makeBuilding("Dorm", "Your tiny kingdom.", 20, -16, 11, 8, 10, 0xc98a5a, [
+    { t: "Sleep till morning", d: "Energy → full · new day", f: () => sleep() },
+    { t: "Chill / game", d: "Energy +8, Social +3 · 2h", f: () => act({ energy: 8, social: 3 }, 2, "Recharged the vibes.") },
+  ]);
+  makeBuilding("Gym", "Gains incoming.", -20, 18, 11, 7, 11, 0xd65a86, [
+    { t: "Workout", d: "Health +12, Energy −14 · 2h", f: () => act({ health: 12, energy: -14 }, 2, "Leg day survived.") },
+    { t: "Basketball", d: "Health +7, Social +7, Energy −12 · 2h", f: () => act({ health: 7, social: 7, energy: -12 }, 2, "Buzzer beater!") },
+  ]);
+  makeBuilding("Café", "Overpriced coffee HQ.", 20, 18, 10, 6, 10, 0x5ec9a1, [
+    { t: "Eat a real meal", d: "Energy +18, Health +5, Money −10 · 1h", f: () => act({ energy: 18, health: 5, money: -10 }, 1, "Fed. Finally.") },
+    { t: "Coffee & study", d: "Energy +8, Grades +4, Money −6 · 1h", f: () => act({ energy: 8, grades: 4, money: -6 }, 1, "Caffeinated genius mode.") },
+  ]);
+  makeBuilding("Student Union", "Where the chaos lives.", 0, 30, 16, 8, 10, 0xd4b24a, [
+    { t: "Go to the party", d: "Social +16, Energy −18, Money −12 · 4h", f: () => act({ social: 16, energy: -18, money: -12 }, 4, "Legendary night.") },
+    { t: "Part-time shift", d: "Money +25, Energy −16 · 4h", f: () => act({ money: 25, energy: -16 }, 4, "Clocked in. Cha-ching.") },
+    { t: "Join a club", d: "Social +9, Grades +2 · 2h", f: () => act({ social: 9, grades: 2 }, 2, "New crew unlocked.") },
+  ]);
+
+  // ---------------- decorations ----------------
+  function makeTree(x, z) {
+    const g = new T.Group();
+    const trunk = addShadow(new T.Mesh(new T.CylinderGeometry(0.25, 0.35, 2, 6), mat(0x7a5230)));
+    trunk.position.y = 1; g.add(trunk);
+    const f1 = addShadow(new T.Mesh(new T.ConeGeometry(1.7, 2.6, 7), mat(0x3f9d4f)));
+    f1.position.y = 3; g.add(f1);
+    const f2 = addShadow(new T.Mesh(new T.ConeGeometry(1.3, 2, 7), mat(0x4bb35c)));
+    f2.position.y = 4.1; g.add(f2);
+    g.position.set(x, 0, z);
+    scene.add(g);
+  }
+  for (let i = 0; i < 26; i++) {
+    let x = (Math.random() * 2 - 1) * WORLD, z = (Math.random() * 2 - 1) * WORLD;
+    if (Math.abs(x) < 6 || Math.abs(z) < 6) continue;        // keep paths clear
+    if (nearBuilding(x, z, 4)) continue;
+    makeTree(x, z);
+  }
+  function makeLamp(x, z) {
+    const g = new T.Group();
+    const pole = addShadow(new T.Mesh(new T.CylinderGeometry(0.12, 0.12, 4, 6), mat(0x3a3f52)));
+    pole.position.y = 2; g.add(pole);
+    const bulb = new T.Mesh(new T.SphereGeometry(0.35, 8, 8), new T.MeshStandardMaterial({ color: 0xfff2b0, emissive: 0xffcf5a, emissiveIntensity: 0.8 }));
+    bulb.position.y = 4; g.add(bulb);
+    g.position.set(x, 0, z); scene.add(g);
+  }
+  for (let z = -36; z <= 36; z += 12) { makeLamp(5.6, z); makeLamp(-5.6, z); }
+
+  function nearBuilding(x, z, pad) {
+    for (const b of buildings)
+      if (Math.abs(x - b.x) < b.hx + pad && Math.abs(z - b.z) < b.hz + pad) return true;
+    return false;
+  }
+
+  // ---------------- character factory ----------------
+  function makePerson(skin, shirt, pants) {
+    const g = new T.Group();
+    const torso = addShadow(box(0.7, 0.8, 0.4, shirt)); torso.position.y = 1.25; g.add(torso);
+    const head = addShadow(box(0.5, 0.5, 0.5, skin)); head.position.y = 1.95; g.add(head);
+    const legL = addShadow(box(0.26, 0.75, 0.26, pants)); legL.position.set(-0.18, 0.42, 0); legL.geometry.translate(0, 0.375, 0); legL.position.y = 0.42 - 0.375 + 0.75; g.add(legL);
+    const legR = legL.clone(); legR.position.x = 0.18; g.add(legR);
+    const armL = addShadow(box(0.2, 0.7, 0.2, shirt)); armL.geometry.translate(0, 0.35, 0); armL.position.set(-0.46, 1.6 - 0.35, 0); g.add(armL);
+    const armR = armL.clone(); armR.position.x = 0.46; g.add(armR);
+    // reposition legs so they pivot at the hip
+    legL.position.set(-0.18, 1.15, 0); legR.position.set(0.18, 1.15, 0);
+    armL.position.set(-0.46, 1.6, 0); armR.position.set(0.46, 1.6, 0);
+    return { g, legL, legR, armL, armR, phase: Math.random() * 6 };
+  }
+  function animatePerson(p, moving, dt) {
+    p.phase += dt * (moving ? 10 : 2);
+    const amp = moving ? 0.7 : 0.05;
+    const s = Math.sin(p.phase) * amp;
+    p.legL.rotation.x = s; p.legR.rotation.x = -s;
+    p.armL.rotation.x = -s; p.armR.rotation.x = s;
+  }
+
+  // player
+  const player = makePerson(0xf0c090, 0x2f6df0, 0x2a2f45);
+  scene.add(player.g);
+  const pos = new T.Vector3(0, 0, 8);
+  let facing = Math.PI;
+
+  // NPCs
+  const npcs = [];
+  const npcColors = [[0xf0c090,0xe0553a,0x333], [0xd9a066,0x36b37e,0x2b2b3a], [0xf5cda0,0xf2b807,0x3a2f2f], [0xe8b98a,0x8a5cf5,0x222], [0xf0c090,0x00b4d8,0x333]];
+  for (let i = 0; i < 14; i++) {
+    const c = npcColors[i % npcColors.length];
+    const p = makePerson(c[0], c[1], c[2]);
+    const sp = new T.Vector3((Math.random()*2-1)*WORLD*0.8, 0, (Math.random()*2-1)*WORLD*0.8);
+    p.g.position.copy(sp);
+    p.target = randTarget();
+    p.speed = 1.6 + Math.random() * 1.2;
+    scene.add(p.g);
+    npcs.push(p);
+  }
+  function randTarget() {
+    let x, z, tries = 0;
+    do { x = (Math.random()*2-1)*WORLD*0.85; z = (Math.random()*2-1)*WORLD*0.85; tries++; }
+    while (nearBuilding(x, z, 2) && tries < 10);
+    return new T.Vector3(x, 0, z);
+  }
+
+  // ---------------- camera control ----------------
+  let camYaw = Math.PI, camPitch = 0.42, camDist = 10;
+  let dragging = false, lastX = 0, lastY = 0;
+
+  const cvs = renderer.domElement;
+  cvs.addEventListener("mousedown", (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  window.addEventListener("mouseup", () => dragging = false);
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    camYaw -= (e.clientX - lastX) * 0.005;
+    camPitch = clamp(camPitch + (e.clientY - lastY) * 0.004, 0.12, 1.15);
+    lastX = e.clientX; lastY = e.clientY;
+  });
+  cvs.addEventListener("wheel", (e) => { camDist = clamp(camDist + e.deltaY * 0.01, 5, 20); e.preventDefault(); }, { passive: false });
+
+  // ---------------- keyboard ----------------
+  const keys = {};
+  window.addEventListener("keydown", (e) => {
+    keys[e.code] = true;
+    if (e.code === "KeyE") tryEnter();
+    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].includes(e.code)) e.preventDefault();
+  });
+  window.addEventListener("keyup", (e) => keys[e.code] = false);
+
+  // ---------------- touch: left half joystick, right half look ----------------
+  const stick = document.getElementById("stick");
+  const nub = stick.querySelector(".nub");
+  let joyId = null, joyX = 0, joyY = 0, joyCx = 0, joyCy = 0;
+  let lookId = null, lookLastX = 0, lookLastY = 0;
+  const isTouch = matchMedia("(pointer: coarse)").matches;
+
+  window.addEventListener("touchstart", (e) => {
+    for (const t of e.changedTouches) {
+      if (t.clientX < innerWidth / 2 && joyId === null) {
+        joyId = t.identifier; joyCx = t.clientX; joyCy = t.clientY;
+        stick.style.display = "block";
+        stick.style.left = (joyCx - 60) + "px"; stick.style.top = (joyCy - 60) + "px";
+        nub.style.left = "50%"; nub.style.top = "50%";
+      } else if (lookId === null) {
+        lookId = t.identifier; lookLastX = t.clientX; lookLastY = t.clientY;
+      }
+    }
+  }, { passive: false });
+  window.addEventListener("touchmove", (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) {
+        let dx = t.clientX - joyCx, dy = t.clientY - joyCy;
+        const len = Math.hypot(dx, dy), max = 45;
+        if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+        joyX = dx / max; joyY = dy / max;
+        nub.style.left = (60 + dx) + "px"; nub.style.top = (60 + dy) + "px";
+      } else if (t.identifier === lookId) {
+        camYaw -= (t.clientX - lookLastX) * 0.006;
+        camPitch = clamp(camPitch + (t.clientY - lookLastY) * 0.005, 0.12, 1.15);
+        lookLastX = t.clientX; lookLastY = t.clientY;
+      }
+    }
+    e.preventDefault();
+  }, { passive: false });
+  window.addEventListener("touchend", (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) { joyId = null; joyX = joyY = 0; stick.style.display = "none"; }
+      if (t.identifier === lookId) lookId = null;
+    }
+  });
+
+  // ---------------- stats / life-sim ----------------
+  const stats = { energy: 80, grades: 20, social: 30, health: 60, money: 40 };
+  let day = 1, hour = 8;
+  function refreshStats() {
+    for (const k in stats) {
+      stats[k] = clamp(stats[k], 0, 100);
+      const el = document.getElementById("f-" + k);
+      if (el) el.style.width = stats[k] + "%";
+    }
+    document.getElementById("clock").textContent =
+      "Day " + day + " · " + String(hour).padStart(2, "0") + ":00";
+  }
+  function advanceTime(h) {
+    hour += h;
+    while (hour >= 24) { hour -= 24; day++; stats.energy = clamp(stats.energy - 6, 0, 100); }
+  }
+  function act(delta, hours, msg) {
+    for (const k in delta) stats[k] = clamp((stats[k] || 0) + delta[k], 0, 100);
+    advanceTime(hours || 1);
+    refreshStats();
+    toast(msg);
+    closePanel();
+  }
+  function sleep() {
+    stats.energy = 100;
+    day++; hour = 8;
+    refreshStats();
+    toast("😴 Slept like a rock. New day!");
+    closePanel();
+  }
+  let toastTimer = null;
+  function toast(msg) {
+    const el = document.getElementById("toast");
+    el.textContent = msg; el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+  }
+
+  // ---------------- building panel ----------------
+  const panel = document.getElementById("panel");
+  let nearB = null;
+  function tryEnter() {
+    if (panel.style.display === "flex") { closePanel(); return; }
+    if (!nearB) return;
+    document.getElementById("p-title").textContent = nearB.name;
+    document.getElementById("p-sub").textContent = nearB.sub;
+    const wrap = document.getElementById("p-acts");
+    wrap.innerHTML = "";
+    for (const a of nearB.acts) {
+      const btn = document.createElement("button");
+      btn.className = "act";
+      btn.innerHTML = a.t + "<small>" + a.d + "</small>";
+      btn.onclick = a.f;
+      wrap.appendChild(btn);
+    }
+    panel.style.display = "flex";
+  }
+  function closePanel() { panel.style.display = "none"; }
+  document.getElementById("p-close").onclick = closePanel;
+  panel.addEventListener("click", (e) => { if (e.target === panel) closePanel(); });
+
+  // ---------------- utils ----------------
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function resolveCollision(p, radius) {
+    for (const b of buildings) {
+      const minx = b.x - b.hx - radius, maxx = b.x + b.hx + radius;
+      const minz = b.z - b.hz - radius, maxz = b.z + b.hz + radius;
+      if (p.x > minx && p.x < maxx && p.z > minz && p.z < maxz) {
+        const dl = p.x - minx, dr = maxx - p.x, dt = p.z - minz, db = maxz - p.z;
+        const m = Math.min(dl, dr, dt, db);
+        if (m === dl) p.x = minx; else if (m === dr) p.x = maxx;
+        else if (m === dt) p.z = minz; else p.z = maxz;
+      }
+    }
+    p.x = clamp(p.x, -WORLD - 4, WORLD + 4);
+    p.z = clamp(p.z, -WORLD - 4, WORLD + 4);
+  }
+
+  // ---------------- loop ----------------
+  const clock = new T.Clock();
+  const promptEl = document.getElementById("prompt");
+  if (isTouch) document.getElementById("hint").textContent = "Left side · move   ·   Right side · look   ·   Tap building prompt to enter";
+
+  function frame() {
+    const dt = Math.min(clock.getDelta(), 0.05);
+
+    // input vector (camera-relative)
+    let inF = 0, inR = 0;
+    if (keys["KeyW"] || keys["ArrowUp"]) inF += 1;
+    if (keys["KeyS"] || keys["ArrowDown"]) inF -= 1;
+    if (keys["KeyD"] || keys["ArrowRight"]) inR += 1;
+    if (keys["KeyA"] || keys["ArrowLeft"]) inR -= 1;
+    if (joyX || joyY) { inR += joyX; inF -= joyY; }
+
+    const fwd = new T.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
+    const right = new T.Vector3(fwd.z, 0, -fwd.x);
+    const move = new T.Vector3().addScaledVector(fwd, inF).addScaledVector(right, inR);
+    const moving = move.lengthSq() > 0.001 && panel.style.display !== "flex";
+
+    if (moving) {
+      move.normalize();
+      const run = keys["ShiftLeft"] || keys["ShiftRight"];
+      const spd = (run ? 9 : 5) * dt;
+      pos.addScaledVector(move, spd);
+      resolveCollision(pos, 0.6);
+      facing = Math.atan2(move.x, move.z);
+    }
+    player.g.position.copy(pos);
+    // smooth turn
+    let d = facing - player.g.rotation.y;
+    while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+    player.g.rotation.y += d * Math.min(dt * 12, 1);
+    animatePerson(player, moving, dt);
+
+    // NPCs wander
+    for (const n of npcs) {
+      const to = new T.Vector3().subVectors(n.target, n.g.position); to.y = 0;
+      const dist = to.length();
+      if (dist < 1) { n.target = randTarget(); }
+      else {
+        to.normalize();
+        n.g.position.addScaledVector(to, n.speed * dt);
+        resolveCollision(n.g.position, 0.5);
+        n.g.rotation.y = Math.atan2(to.x, to.z);
+      }
+      animatePerson(n, dist >= 1, dt);
+    }
+
+    // nearest building prompt
+    nearB = null; let bestD = 6;
+    for (const b of buildings) {
+      const dx = Math.max(Math.abs(pos.x - b.x) - b.hx, 0);
+      const dz = Math.max(Math.abs(pos.z - b.z) - b.hz, 0);
+      const dd = Math.hypot(dx, dz);
+      if (dd < bestD) { bestD = dd; nearB = b; }
+    }
+    if (nearB && panel.style.display !== "flex") {
+      promptEl.style.display = "block";
+      promptEl.innerHTML = "Press <b>E</b> to enter " + nearB.name;
+    } else promptEl.style.display = "none";
+
+    // camera follow
+    const target = new T.Vector3(pos.x, pos.y + 1.6, pos.z);
+    const off = new T.Vector3(
+      Math.sin(camYaw) * Math.cos(camPitch),
+      Math.sin(camPitch),
+      Math.cos(camYaw) * Math.cos(camPitch)
+    ).multiplyScalar(camDist);
+    camera.position.lerp(new T.Vector3().addVectors(target, off), Math.min(dt * 10, 1));
+    camera.lookAt(target);
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  refreshStats();
+  document.getElementById("loading").style.display = "none";
+  frame();
+})();
+</script>
+</body>
+</html>
