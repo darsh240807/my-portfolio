@@ -15,39 +15,19 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
-  #wrap {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-    image-rendering: optimizeSpeed;
-    cursor: pointer;
-  }
+  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
   #hint {
-    position: fixed;
-    left: 50%;
-    bottom: 14px;
-    transform: translateX(-50%);
-    color: #6a5a9a;
-    font-size: 12px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    pointer-events: none;
-    user-select: none;
-    text-shadow: 0 0 8px #1a0f3a;
-    z-index: 5;
+    position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
+    color: #6a5a9a; font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+    pointer-events: none; user-select: none; text-shadow: 0 0 8px #1a0f3a; z-index: 5;
+    text-align: center; width: 96%;
   }
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="c"></canvas></div>
-<div id="hint">SPACE / CLICK / TAP&nbsp;·&nbsp;flip gravity&nbsp;&nbsp;&nbsp;SHIFT / 2-FINGER&nbsp;·&nbsp;WARP</div>
+<div id="hint">SPACE / CLICK / TAP · flip gravity&nbsp;&nbsp;·&nbsp;&nbsp;SHIFT / 2-FINGER · WARP&nbsp;&nbsp;·&nbsp;&nbsp;P · pause&nbsp;&nbsp;·&nbsp;&nbsp;M · mute</div>
 <script>
 (() => {
   "use strict";
@@ -58,10 +38,8 @@
 
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth;
-    H = window.innerHeight;
-    cv.width = Math.floor(W * DPR);
-    cv.height = Math.floor(H * DPR);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.floor(W * DPR); cv.height = Math.floor(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   }
   window.addEventListener("resize", resize);
@@ -75,183 +53,187 @@
 
   let best = 0;
   try { best = parseInt(localStorage.getItem("warprush_best") || "0", 10) || 0; } catch (e) {}
+  let muted = false;
+  try { muted = localStorage.getItem("warprush_muted") === "1"; } catch (e) {}
 
-  // ---------- game state ----------
-  const STATE = { MENU: 0, PLAY: 1, DEAD: 2 };
-  let state = STATE.MENU;
-
-  const player = {
-    x: 0, y: 0, r: 13,
-    gravDir: 1,        // 1 = down, -1 = up
-    vy: 0,
-    trail: [],
+  // ---------- audio (Web Audio, lazy) ----------
+  let AC = null;
+  function audioInit() {
+    if (AC) return;
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+  }
+  function sfx(freq, dur, type, vol, slideTo) {
+    if (muted || !AC) return;
+    try {
+      const t = AC.currentTime;
+      const o = AC.createOscillator();
+      const g = AC.createGain();
+      o.type = type || "square";
+      o.frequency.setValueAtTime(freq, t);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol || 0.12, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(AC.destination);
+      o.start(t); o.stop(t + dur + 0.02);
+    } catch (e) {}
+  }
+  const S = {
+    flip:   () => sfx(320, 0.10, "square", 0.10, 220),
+    orb:    (m) => sfx(560 + m * 60, 0.12, "sine", 0.14, 900 + m * 80),
+    warp:   () => { sfx(180, 0.5, "sawtooth", 0.16, 1200); sfx(90, 0.5, "square", 0.10, 400); },
+    shield: () => { sfx(500, 0.12, "sine", 0.14, 760); sfx(760, 0.16, "sine", 0.12, 1100); },
+    block:  () => sfx(240, 0.18, "sawtooth", 0.16, 90),
+    die:    () => { sfx(300, 0.6, "sawtooth", 0.2, 50); sfx(150, 0.7, "square", 0.14, 40); },
+    count:  () => sfx(660, 0.08, "sine", 0.10),
+    go:     () => sfx(880, 0.22, "sine", 0.14, 1320),
   };
 
-  let obstacles = [];
-  let orbs = [];
-  let particles = [];
-  let stars = [];
-  let ripples = [];
+  // ---------- state ----------
+  const STATE = { MENU: 0, PLAY: 1, DEAD: 2 };
+  let state = STATE.MENU;
+  let paused = false;
 
+  const player = {
+    x: 0, y: 0, r: 13, gravDir: 1, vy: 0, trail: [],
+  };
+
+  let obstacles = [], orbs = [], particles = [], stars = [], ripples = [], pops = [];
   let score = 0, displayScore = 0, combo = 0, comboTimer = 0, mult = 1;
-  let warp = 0;                 // 0..1 charge
-  let warpActive = 0;           // seconds remaining
-  let timeScale = 1;
-  let speed = 0;
-  let dist = 0;
-  let shake = 0;
+  let warp = 0, warpActive = 0, timeScale = 1;
+  let speed = 0, dist = 0, shake = 0;
   let flashT = 0, flashColor = "#ffffff";
-  let spawnT = 0, orbT = 0;
+  let spawnT = 0, orbT = 0, shieldT = 0;
   let hue = 265;
-  let deadAt = 0;
-  let startAt = 0;
-  let chroma = 0;
+  let deadAt = 0, startAt = 0;
+  let grace = 0, countdown = 0, lastCount = 4;
+  let hasShield = false;
 
-  const GRAV = 2600;      // px/s^2
-  const FLIP_KICK = 120;  // small bounce on flip
-  const LANE_PAD = 70;    // top/bottom play area padding
+  const GRAV = 2500;
+  const FLIP_KICK = 115;
+  const LANE_PAD = 66;
 
   function reset() {
-    obstacles = [];
-    orbs = [];
-    particles = [];
-    ripples = [];
+    obstacles = []; orbs = []; particles = []; ripples = []; pops = [];
     player.x = Math.max(120, W * 0.26);
     player.y = H * 0.5;
-    player.gravDir = 1;
-    player.vy = 0;
-    player.trail = [];
+    player.gravDir = 1; player.vy = 0; player.trail = [];
     score = 0; displayScore = 0; combo = 0; comboTimer = 0; mult = 1;
     warp = 0; warpActive = 0; timeScale = 1;
-    speed = 340;
-    dist = 0;
-    shake = 0;
-    spawnT = 0.7; orbT = 0.4;
-    startAt = now();
+    speed = 300; dist = 0; shake = 0;
+    spawnT = 1.0; orbT = 0.5; shieldT = 9;
+    hasShield = false;
+    grace = 0;
+    countdown = 3.2; lastCount = 4;
+    startAt = 0;
     state = STATE.PLAY;
+    paused = false;
   }
 
   function initStars() {
     stars = [];
     const n = Math.round((W * H) / 9000);
-    for (let i = 0; i < n; i++) {
-      stars.push({
-        x: rand(0, W), y: rand(0, H),
-        z: rand(0.2, 1),
-        r: rand(0.4, 1.8),
-      });
-    }
+    for (let i = 0; i < n; i++)
+      stars.push({ x: rand(0, W), y: rand(0, H), z: rand(0.2, 1), r: rand(0.4, 1.8) });
   }
   initStars();
   window.addEventListener("resize", initStars);
 
-  // ---------- particles ----------
+  // ---------- particles / fx ----------
   function burst(x, y, color, count, spd, life) {
     for (let i = 0; i < count; i++) {
-      const a = rand(0, TAU);
-      const s = rand(spd * 0.25, spd);
-      particles.push({
-        x, y,
-        vx: Math.cos(a) * s,
-        vy: Math.sin(a) * s,
-        life: rand(life * 0.5, life),
-        max: life,
-        r: rand(1.5, 4.5),
-        color,
-      });
+      const a = rand(0, TAU), s = rand(spd * 0.25, spd);
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+        life: rand(life * 0.5, life), max: life, r: rand(1.5, 4.5), color });
     }
   }
-
-  function ring(x, y, color, r0, r1) {
-    ripples.push({ x, y, r: r0, max: r1, life: 1, color });
-  }
+  function ring(x, y, color, r0, r1) { ripples.push({ x, y, r: r0, max: r1, life: 1, color }); }
+  function popup(x, y, text, color) { pops.push({ x, y, text, color, life: 1 }); }
 
   // ---------- input ----------
   function flip() {
+    audioInit();
     if (state === STATE.MENU) { reset(); return; }
-    if (state === STATE.DEAD) {
-      if (now() - deadAt > 550) { reset(); }
-      return;
-    }
+    if (state === STATE.DEAD) { if (now() - deadAt > 550) reset(); return; }
+    if (paused) return;
+    if (countdown > 0) return;
     player.gravDir *= -1;
     player.vy = -player.gravDir * FLIP_KICK;
-    burst(player.x, player.y, `hsl(${hue},90%,65%)`, 10, 260, 0.5);
-    ring(player.x, player.y, `hsl(${hue},90%,70%)`, player.r, player.r + 46);
-    shake = Math.min(shake + 3, 14);
+    burst(player.x, player.y, `hsl(${hue},90%,65%)`, 9, 240, 0.5);
+    ring(player.x, player.y, `hsl(${hue},90%,70%)`, player.r, player.r + 42);
+    shake = Math.min(shake + 2.5, 12);
+    S.flip();
   }
-
   function tryWarp() {
-    if (state !== STATE.PLAY) return;
+    audioInit();
+    if (state !== STATE.PLAY || paused || countdown > 0) return;
     if (warp >= 1 && warpActive <= 0) {
-      warpActive = 2.2;
-      warp = 0;
-      shake = 20;
+      warpActive = 2.4; warp = 0; shake = 18;
       flashT = 0.25; flashColor = "#b9a6ff";
       ring(player.x, player.y, "#c9b8ff", player.r, 220);
-      burst(player.x, player.y, "#d9ccff", 46, 620, 0.9);
+      burst(player.x, player.y, "#d9ccff", 44, 600, 0.9);
+      popup(player.x, player.y - 40, "WARP!", "#d9ccff");
+      S.warp();
     }
+  }
+  function togglePause() {
+    if (state !== STATE.PLAY || countdown > 0) return;
+    paused = !paused;
+  }
+  function toggleMute() {
+    muted = !muted;
+    try { localStorage.setItem("warprush_muted", muted ? "1" : "0"); } catch (e) {}
   }
 
   window.addEventListener("keydown", (e) => {
     if (e.repeat) return;
-    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") {
-      e.preventDefault(); flip();
-    } else if (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyE") {
-      e.preventDefault(); tryWarp();
-    }
+    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") { e.preventDefault(); flip(); }
+    else if (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyE") { e.preventDefault(); tryWarp(); }
+    else if (e.code === "KeyP") { e.preventDefault(); togglePause(); }
+    else if (e.code === "KeyM") { e.preventDefault(); toggleMute(); }
   });
-
   cv.addEventListener("mousedown", (e) => { e.preventDefault(); flip(); });
-
   cv.addEventListener("touchstart", (e) => {
     e.preventDefault();
-    if (e.touches.length >= 2) tryWarp();
-    else flip();
+    if (e.touches.length >= 2) tryWarp(); else flip();
   }, { passive: false });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && state === STATE.PLAY && countdown <= 0) paused = true;
+  });
 
-  // ---------- spawning ----------
+  // ---------- spawning (difficulty scales with elapsed) ----------
+  function elapsedSec() { return startAt ? (now() - startAt) / 1000 : 0; }
+
   function spawnObstacle() {
-    // pillars from top and/or bottom with a gap the player must weave through
-    const gap = rand(150, 210);
+    const e = elapsedSec();
+    const gap = clamp(250 - e * 1.3, 158, 250);   // starts roomy, tightens slowly
     const usable = H - LANE_PAD * 2 - gap;
-    const topH = LANE_PAD + rand(0, usable);
-    const w = rand(26, 46);
+    const topH = LANE_PAD + rand(0, Math.max(10, usable));
+    const w = rand(24, 42);
     const kind = Math.random();
     const col = `hsl(${(hue + rand(-30, 30) + 360) % 360},85%,58%)`;
-
-    if (kind < 0.62) {
-      // pair with a gap
+    if (kind < 0.6) {
       obstacles.push({ x: W + 40, y: 0, w, h: topH, hit: 0, color: col });
       obstacles.push({ x: W + 40, y: topH + gap, w, h: H - (topH + gap), hit: 0, color: col });
     } else if (kind < 0.82) {
-      // single spike bar (top or bottom)
       const fromTop = Math.random() < 0.5;
-      const bh = rand(90, H * 0.45);
-      obstacles.push({
-        x: W + 40, y: fromTop ? 0 : H - bh, w, h: bh, hit: 0, color: col,
-      });
+      const bh = rand(80, H * 0.42);
+      obstacles.push({ x: W + 40, y: fromTop ? 0 : H - bh, w, h: bh, hit: 0, color: col });
     } else {
-      // floating block in the middle
-      const bh = rand(60, 150);
+      const bh = rand(60, 140);
       const by = rand(LANE_PAD, H - LANE_PAD - bh);
-      obstacles.push({ x: W + 40, y: by, w: rand(34, 60), h: bh, hit: 0, color: col });
+      obstacles.push({ x: W + 40, y: by, w: rand(32, 56), h: bh, hit: 0, color: col });
     }
   }
-
   function spawnOrb() {
-    orbs.push({
-      x: W + 30,
-      y: rand(LANE_PAD + 20, H - LANE_PAD - 20),
-      r: 9,
-      t: rand(0, TAU),
-      got: 0,
-    });
+    orbs.push({ x: W + 30, y: rand(LANE_PAD + 20, H - LANE_PAD - 20), r: 9, t: rand(0, TAU), kind: 0 });
+  }
+  function spawnShield() {
+    orbs.push({ x: W + 30, y: rand(LANE_PAD + 20, H - LANE_PAD - 20), r: 12, t: rand(0, TAU), kind: 1 });
   }
 
-  // ---------- collision ----------
   function circleRect(cx, cy, cr, rx, ry, rw, rh) {
-    const nx = clamp(cx, rx, rx + rw);
-    const ny = clamp(cy, ry, ry + rh);
+    const nx = clamp(cx, rx, rx + rw), ny = clamp(cy, ry, ry + rh);
     const dx = cx - nx, dy = cy - ny;
     return dx * dx + dy * dy < cr * cr;
   }
@@ -260,196 +242,186 @@
   function update(dt) {
     hue = (hue + dt * 12) % 360;
 
-    // background stars always drift
-    const bgSpeed = state === STATE.PLAY ? speed : 90;
+    const bgSpeed = state === STATE.PLAY && !paused ? speed : 90;
+    const bgMul = state === STATE.PLAY && !paused ? 1 : 0.4;
     for (const s of stars) {
-      s.x -= bgSpeed * s.z * dt * (state === STATE.PLAY ? 1 : 0.4);
+      s.x -= bgSpeed * s.z * dt * bgMul;
       if (s.x < -4) { s.x = W + 4; s.y = rand(0, H); }
     }
-
-    // ripples
     for (let i = ripples.length - 1; i >= 0; i--) {
       const rp = ripples[i];
       rp.r += (rp.max - rp.r) * clamp(dt * 6, 0, 1);
       rp.life -= dt * 2.2;
       if (rp.life <= 0) ripples.splice(i, 1);
     }
-
-    // particles
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vx *= 0.94;
-      p.vy *= 0.94;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.94; p.vy *= 0.94;
       p.life -= dt;
       if (p.life <= 0) particles.splice(i, 1);
     }
-
+    for (let i = pops.length - 1; i >= 0; i--) {
+      pops[i].y -= dt * 40; pops[i].life -= dt * 1.4;
+      if (pops[i].life <= 0) pops.splice(i, 1);
+    }
     if (shake > 0) shake = Math.max(0, shake - dt * 40);
     if (flashT > 0) flashT -= dt;
 
-    if (state !== STATE.PLAY) return;
+    if (state !== STATE.PLAY || paused) return;
 
-    // ----- warp / time -----
+    // countdown gate
+    if (countdown > 0) {
+      countdown -= dt;
+      const c = Math.ceil(countdown);
+      if (c !== lastCount && c >= 1) { lastCount = c; S.count(); }
+      if (countdown <= 0) { startAt = now(); grace = 1.1; S.go(); }
+      // gentle float during countdown
+      player.y = H * 0.5 + Math.sin(now() / 300) * 8;
+      return;
+    }
+    if (grace > 0) grace -= dt;
+
+    // warp / time scaling
     if (warpActive > 0) {
-      warpActive -= dt;               // warp uses real time
+      warpActive -= dt;
       timeScale += (0.32 - timeScale) * clamp(dt * 8, 0, 1);
-      chroma += (6 - chroma) * clamp(dt * 6, 0, 1);
     } else {
       timeScale += (1 - timeScale) * clamp(dt * 6, 0, 1);
-      chroma += (0 - chroma) * clamp(dt * 6, 0, 1);
     }
-    const g = dt * timeScale;          // scaled dt for the world
+    const g = dt * timeScale;
 
-    // difficulty ramp
-    const elapsed = (now() - startAt) / 1000;
-    speed = 340 + Math.min(elapsed * 12, 520) + score * 0.01;
-
+    const e = elapsedSec();
+    speed = 300 + Math.min(e * 10, 440) + score * 0.008;   // gentler ramp
     dist += speed * g;
 
-    // ----- player physics -----
+    // physics
     player.vy += GRAV * player.gravDir * g;
     player.vy = clamp(player.vy, -1500, 1500);
     player.y += player.vy * g;
-
-    // clamp to lane (walls kill combo lightly but not fatal)
     const top = player.r + 4, bot = H - player.r - 4;
     if (player.y < top) { player.y = top; player.vy = 0; }
     if (player.y > bot) { player.y = bot; player.vy = 0; }
 
-    // trail
     player.trail.push({ x: player.x, y: player.y });
     if (player.trail.length > 18) player.trail.shift();
 
-    // ----- spawns -----
+    // spawns
     spawnT -= g;
-    const spawnEvery = clamp(1.15 - elapsed * 0.01, 0.42, 1.15);
-    if (spawnT <= 0) { spawnObstacle(); spawnT = spawnEvery * rand(0.75, 1.15); }
+    const spawnEvery = clamp(1.3 - e * 0.008, 0.52, 1.3);
+    if (spawnT <= 0) { spawnObstacle(); spawnT = spawnEvery * rand(0.8, 1.15); }
     orbT -= g;
-    if (orbT <= 0) { spawnOrb(); orbT = rand(0.5, 1.3); }
+    if (orbT <= 0) { spawnOrb(); orbT = rand(0.45, 1.1); }
+    shieldT -= g;
+    if (shieldT <= 0) { spawnShield(); shieldT = rand(13, 20); }
 
-    // ----- obstacles -----
+    const invincible = grace > 0 || warpActive > 0;
+
+    // obstacles
     for (let i = obstacles.length - 1; i >= 0; i--) {
       const o = obstacles[i];
       o.x -= speed * g;
       if (o.hit > 0) o.hit -= dt * 3;
-      // near-miss pass = points + shake
       if (!o.passed && o.x + o.w < player.x - player.r) {
         o.passed = 1;
-        addScore(5, player.x, player.y, false);
+        // near-miss detection: how close vertically did we squeak by?
+        const near = Math.min(Math.abs(player.y - o.y), Math.abs(player.y - (o.y + o.h)));
+        if (near < 34 && !invincible) {
+          score += Math.round(15 * mult);
+          warp = clamp(warp + 0.03, 0, 1);
+          popup(player.x + 18, player.y - 22, "CLOSE!", "#ffd35a");
+          shake = Math.min(shake + 3, 14);
+        } else {
+          score += Math.round(6 * mult);
+        }
       }
       if (o.x + o.w < -60) { obstacles.splice(i, 1); continue; }
 
-      if (warpActive <= 0 && circleRect(player.x, player.y, player.r - 2, o.x, o.y, o.w, o.h)) {
-        die();
-        return;
-      } else if (warpActive > 0 && circleRect(player.x, player.y, player.r + 6, o.x, o.y, o.w, o.h)) {
-        // phasing through during warp shreds obstacles for bonus
+      if (warpActive > 0 && circleRect(player.x, player.y, player.r + 6, o.x, o.y, o.w, o.h)) {
         o.hit = 1;
-        if (!o.shredded) {
-          o.shredded = 1;
-          burst(player.x, o.y + o.h * 0.5, "#c9b8ff", 8, 300, 0.4);
-          addScore(3, player.x, player.y, false);
+        if (!o.shredded) { o.shredded = 1; burst(player.x, o.y + o.h * 0.5, "#c9b8ff", 8, 300, 0.4); score += Math.round(4 * mult); }
+      } else if (!invincible && circleRect(player.x, player.y, player.r - 2, o.x, o.y, o.w, o.h)) {
+        if (hasShield) {
+          hasShield = false; grace = 0.9; shake = 18;
+          flashT = 0.2; flashColor = "#4fe0ff";
+          o.hit = 1; o.shredded = 1;
+          burst(player.x, player.y, "#4fe0ff", 30, 480, 0.7);
+          ring(player.x, player.y, "#4fe0ff", player.r, 150);
+          popup(player.x, player.y - 34, "SHIELD DOWN", "#4fe0ff");
+          S.block();
+        } else {
+          die(); return;
         }
       }
     }
 
-    // ----- orbs -----
+    // orbs / shields
     for (let i = orbs.length - 1; i >= 0; i--) {
       const or = orbs[i];
-      or.x -= speed * g;
-      or.t += dt * 6;
+      or.x -= speed * g; or.t += dt * 6;
       if (or.x < -30) { orbs.splice(i, 1); continue; }
       const dx = or.x - player.x, dy = or.y - player.y;
-      const magnet = warpActive > 0 ? 120 : 46;
+      const magnet = (warpActive > 0 ? 130 : 56) + (or.kind ? 20 : 0);
       const d2 = dx * dx + dy * dy;
-      if (d2 < magnet * magnet) {
-        // pull toward player a bit
-        or.x -= dx * clamp(dt * 6, 0, 1);
-        or.y -= dy * clamp(dt * 6, 0, 1);
-      }
+      if (d2 < magnet * magnet) { or.x -= dx * clamp(dt * 6, 0, 1); or.y -= dy * clamp(dt * 6, 0, 1); }
       if (d2 < (or.r + player.r) * (or.r + player.r)) {
         orbs.splice(i, 1);
-        collectOrb(or.x, or.y);
+        if (or.kind) collectShield(or.x, or.y); else collectOrb(or.x, or.y);
       }
     }
 
-    // ----- combo decay -----
-    if (comboTimer > 0) {
-      comboTimer -= dt;
-      if (comboTimer <= 0) { combo = 0; mult = 1; }
-    }
-
-    // score readout easing
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) { combo = 0; mult = 1; } }
     displayScore += (score - displayScore) * clamp(dt * 10, 0, 1);
   }
 
-  function addScore(base, x, y, big) {
-    score += Math.round(base * mult);
-  }
-
   function collectOrb(x, y) {
-    combo++;
-    comboTimer = 2.6;
-    mult = 1 + Math.floor(combo / 5);
-    mult = clamp(mult, 1, 9);
-    score += Math.round(10 * mult);
-    warp = clamp(warp + 0.09, 0, 1);
+    combo++; comboTimer = 2.8;
+    mult = clamp(1 + Math.floor(combo / 4), 1, 12);
+    score += Math.round(12 * mult);
+    warp = clamp(warp + 0.11, 0, 1);
     const c = `hsl(${(hue + 40) % 360},95%,66%)`;
-    burst(x, y, c, 14, 340, 0.6);
-    ring(x, y, c, 4, 40);
-    shake = Math.min(shake + 2.5, 16);
-    flashT = Math.max(flashT, 0.06); flashColor = "#3a2a6a";
+    burst(x, y, c, 13, 320, 0.6);
+    ring(x, y, c, 4, 38);
+    if (combo > 1 && combo % 4 === 0) popup(x, y - 26, "×" + mult, c);
+    shake = Math.min(shake + 2, 14);
+    S.orb(mult);
   }
-
+  function collectShield(x, y) {
+    hasShield = true;
+    burst(x, y, "#4fe0ff", 22, 420, 0.7);
+    ring(x, y, "#4fe0ff", 4, 60);
+    popup(x, y - 28, "+SHIELD", "#4fe0ff");
+    warp = clamp(warp + 0.05, 0, 1);
+    S.shield();
+  }
   function die() {
-    state = STATE.DEAD;
-    deadAt = now();
-    shake = 26;
+    state = STATE.DEAD; deadAt = now(); shake = 26;
     flashT = 0.3; flashColor = "#ff3b6b";
     burst(player.x, player.y, "#ff5580", 60, 640, 1.0);
     burst(player.x, player.y, "#ffffff", 24, 420, 0.7);
     ring(player.x, player.y, "#ff5580", player.r, 260);
-    if (score > best) {
-      best = Math.round(score);
-      try { localStorage.setItem("warprush_best", String(best)); } catch (e) {}
-    }
+    S.die();
+    if (score > best) { best = Math.round(score); try { localStorage.setItem("warprush_best", String(best)); } catch (e) {} }
   }
 
   // ---------- draw ----------
   function draw() {
     ctx.save();
-
-    // shake
     let sx = 0, sy = 0;
-    if (shake > 0.1) {
-      sx = rand(-shake, shake);
-      sy = rand(-shake, shake);
-    }
+    if (shake > 0.1) { sx = rand(-shake, shake); sy = rand(-shake, shake); }
     ctx.translate(sx, sy);
 
-    // background
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#0a0320");
-    grad.addColorStop(0.5, "#120636");
-    grad.addColorStop(1, "#05010f");
-    ctx.fillStyle = grad;
-    ctx.fillRect(-40, -40, W + 80, H + 80);
+    grad.addColorStop(0, "#0a0320"); grad.addColorStop(0.5, "#120636"); grad.addColorStop(1, "#05010f");
+    ctx.fillStyle = grad; ctx.fillRect(-40, -40, W + 80, H + 80);
 
-    // warp radial glow
     if (warpActive > 0) {
       const rg = ctx.createRadialGradient(player.x, player.y, 10, player.x, player.y, Math.max(W, H) * 0.7);
-      rg.addColorStop(0, "rgba(150,120,255,0.28)");
-      rg.addColorStop(1, "rgba(150,120,255,0)");
-      ctx.fillStyle = rg;
-      ctx.fillRect(-40, -40, W + 80, H + 80);
+      rg.addColorStop(0, "rgba(150,120,255,0.28)"); rg.addColorStop(1, "rgba(150,120,255,0)");
+      ctx.fillStyle = rg; ctx.fillRect(-40, -40, W + 80, H + 80);
     }
 
-    // horizon grid (synthwave)
     drawGrid();
 
-    // stars
     for (const s of stars) {
       ctx.globalAlpha = 0.35 + s.z * 0.5;
       ctx.fillStyle = s.z > 0.7 ? "#cbb8ff" : "#5a4a8a";
@@ -457,64 +429,47 @@
     }
     ctx.globalAlpha = 1;
 
-    // ripples
     for (const rp of ripples) {
       ctx.globalAlpha = clamp(rp.life, 0, 1) * 0.8;
-      ctx.strokeStyle = rp.color;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(rp.x, rp.y, rp.r, 0, TAU);
-      ctx.stroke();
+      ctx.strokeStyle = rp.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rp.x, rp.y, rp.r, 0, TAU); ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
-    if (state !== STATE.MENU) {
-      drawObstacles();
-      drawOrbs();
-      drawPlayer();
-    }
+    if (state !== STATE.MENU) { drawObstacles(); drawOrbs(); drawPlayer(); }
 
-    // particles
     for (const p of particles) {
       const a = clamp(p.life / p.max, 0, 1);
-      ctx.globalAlpha = a;
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r * a, 0, TAU);
-      ctx.fill();
+      ctx.globalAlpha = a; ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * a, 0, TAU); ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    // flash overlay
+    // floating popups
+    for (const pp of pops) {
+      ctx.globalAlpha = clamp(pp.life, 0, 1);
+      txt(pp.text, pp.x, pp.y, 18, pp.color, "center");
+    }
+    ctx.globalAlpha = 1;
+
     if (flashT > 0) {
       ctx.globalAlpha = clamp(flashT * 2, 0, 0.6);
-      ctx.fillStyle = flashColor;
-      ctx.fillRect(-40, -40, W + 80, H + 80);
+      ctx.fillStyle = flashColor; ctx.fillRect(-40, -40, W + 80, H + 80);
       ctx.globalAlpha = 1;
     }
-
     ctx.restore();
 
-    // UI is drawn without shake
     drawUI();
     drawScanlines();
   }
 
   function drawGrid() {
     const horizon = H * 0.5;
-    ctx.strokeStyle = "rgba(120,60,200,0.14)";
-    ctx.lineWidth = 1;
-    // vertical converging lines
+    ctx.strokeStyle = "rgba(120,60,200,0.14)"; ctx.lineWidth = 1;
     const cxc = W * 0.5;
     for (let i = -10; i <= 10; i++) {
-      ctx.beginPath();
-      ctx.moveTo(cxc + i * 40, horizon);
-      ctx.lineTo(cxc + i * 240, H + 60);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(cxc + i * 40, horizon);
-      ctx.lineTo(cxc + i * 240, -60);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cxc + i * 40, horizon); ctx.lineTo(cxc + i * 240, H + 60); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cxc + i * 40, horizon); ctx.lineTo(cxc + i * 240, -60); ctx.stroke();
     }
     const off = (dist * 0.15) % 60;
     for (let i = 0; i < 12; i++) {
@@ -531,166 +486,153 @@
   function drawObstacles() {
     for (const o of obstacles) {
       ctx.save();
-      ctx.shadowColor = o.color;
-      ctx.shadowBlur = 18;
+      ctx.shadowColor = o.color; ctx.shadowBlur = 18;
       ctx.fillStyle = o.hit > 0 ? "#ffffff" : "rgba(10,4,26,0.85)";
-      roundRect(o.x, o.y, o.w, o.h, 6);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.lineWidth = 2.5;
-      ctx.strokeStyle = o.color;
-      roundRect(o.x, o.y, o.w, o.h, 6);
-      ctx.stroke();
-      // inner scan
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = o.color;
-      ctx.lineWidth = 1;
+      roundRect(o.x, o.y, o.w, o.h, 6); ctx.fill();
+      ctx.shadowBlur = 0; ctx.lineWidth = 2.5; ctx.strokeStyle = o.color;
+      roundRect(o.x, o.y, o.w, o.h, 6); ctx.stroke();
+      ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
       const yy = o.y + ((dist * 0.5) % Math.max(20, o.h));
       ctx.beginPath(); ctx.moveTo(o.x + 3, yy); ctx.lineTo(o.x + o.w - 3, yy); ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.restore();
     }
   }
-
   function drawOrbs() {
     for (const or of orbs) {
       const pulse = 1 + Math.sin(or.t) * 0.18;
       ctx.save();
-      ctx.shadowColor = "#ffd35a";
-      ctx.shadowBlur = 22;
-      ctx.fillStyle = "#ffe08a";
-      ctx.beginPath();
-      ctx.arc(or.x, or.y, or.r * pulse, 0, TAU);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = "#fffbe6";
-      ctx.beginPath();
-      ctx.arc(or.x - 2, or.y - 2, or.r * 0.4, 0, TAU);
-      ctx.fill();
+      if (or.kind) {
+        ctx.shadowColor = "#4fe0ff"; ctx.shadowBlur = 24;
+        ctx.strokeStyle = "#8ff0ff"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(or.x, or.y, or.r * pulse, 0, TAU); ctx.stroke();
+        ctx.shadowBlur = 0; ctx.fillStyle = "#4fe0ff";
+        ctx.beginPath(); ctx.arc(or.x, or.y, or.r * 0.45, 0, TAU); ctx.fill();
+      } else {
+        ctx.shadowColor = "#ffd35a"; ctx.shadowBlur = 22;
+        ctx.fillStyle = "#ffe08a";
+        ctx.beginPath(); ctx.arc(or.x, or.y, or.r * pulse, 0, TAU); ctx.fill();
+        ctx.shadowBlur = 0; ctx.fillStyle = "#fffbe6";
+        ctx.beginPath(); ctx.arc(or.x - 2, or.y - 2, or.r * 0.4, 0, TAU); ctx.fill();
+      }
       ctx.restore();
     }
   }
-
   function drawPlayer() {
-    // trail
     for (let i = 0; i < player.trail.length; i++) {
-      const t = player.trail[i];
-      const a = i / player.trail.length;
+      const t = player.trail[i], a = i / player.trail.length;
       ctx.globalAlpha = a * (warpActive > 0 ? 0.7 : 0.45);
       ctx.fillStyle = warpActive > 0 ? "#c9b8ff" : `hsl(${hue},90%,65%)`;
-      ctx.beginPath();
-      ctx.arc(t.x, t.y, player.r * a * 0.9, 0, TAU);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(t.x, t.y, player.r * a * 0.9, 0, TAU); ctx.fill();
     }
     ctx.globalAlpha = 1;
 
     const col = warpActive > 0 ? "#d9ccff" : `hsl(${hue},95%,66%)`;
     ctx.save();
-    ctx.shadowColor = col;
-    ctx.shadowBlur = 28;
-    // outer core
+    // shield ring
+    if (hasShield) {
+      ctx.strokeStyle = "#4fe0ff"; ctx.lineWidth = 3;
+      ctx.shadowColor = "#4fe0ff"; ctx.shadowBlur = 16;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 8, 0, TAU); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    }
+    // grace flicker
+    if (grace > 0 && Math.floor(now() / 90) % 2 === 0) ctx.globalAlpha = 0.5;
+    ctx.shadowColor = col; ctx.shadowBlur = 28;
     ctx.fillStyle = col;
-    ctx.beginPath();
-    ctx.arc(player.x, player.y, player.r, 0, TAU);
-    ctx.fill();
-    // white hot center
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(player.x, player.y, player.r * 0.5, 0, TAU);
-    ctx.fill();
-    // gravity direction spike
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(player.x, player.y);
-    ctx.lineTo(player.x, player.y + player.gravDir * (player.r + 10));
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, TAU); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r * 0.5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(player.x, player.y);
+    ctx.lineTo(player.x, player.y + player.gravDir * (player.r + 10)); ctx.stroke();
     ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   // ---------- UI ----------
   function txt(s, x, y, size, color, align, weight) {
     ctx.font = `${weight || "bold"} ${size}px "Courier New", monospace`;
-    ctx.textAlign = align || "left";
-    ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = color;
-    ctx.fillText(s, x, y);
+    ctx.textAlign = align || "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = color; ctx.fillText(s, x, y);
   }
-
   function drawUI() {
-    if (state === STATE.MENU) {
-      drawTitle();
-      return;
-    }
+    // mute indicator (always)
+    txt(muted ? "🔇" : "🔊", W - 20, H - 16, 16, "#7a6aaa", "right");
 
-    // score
+    if (state === STATE.MENU) { drawTitle(); return; }
+
     ctx.shadowColor = "#000"; ctx.shadowBlur = 8;
     txt(String(Math.round(displayScore)).padStart(6, "0"), 20, 44, 34, "#ffffff", "left");
     ctx.shadowBlur = 0;
     txt("BEST " + best, 20, 66, 13, "#7a6aaa", "left");
 
-    // multiplier
     if (mult > 1) {
       const pop = 1 + Math.sin(now() / 90) * 0.06;
-      ctx.save();
-      ctx.translate(20, 96);
-      ctx.scale(pop, pop);
+      ctx.save(); ctx.translate(20, 96); ctx.scale(pop, pop);
       txt("×" + mult + "  " + combo + " COMBO", 0, 0, 18, `hsl(${(hue+40)%360},95%,68%)`, "left");
       ctx.restore();
     }
+    if (hasShield) txt("◈ SHIELD", 20, 122, 15, "#4fe0ff", "left");
 
     // warp meter
-    const mw = 220, mh = 12, mx = W - mw - 20, my = 28;
+    const mw = Math.min(220, W * 0.45), mh = 12, mx = W - mw - 20, my = 28;
     ctx.strokeStyle = "#3a2a6a"; ctx.lineWidth = 2;
     roundRect(mx, my, mw, mh, 6); ctx.stroke();
-    const fillW = (mw - 4) * warp;
-    const ready = warp >= 1;
+    const fillW = (mw - 4) * warp, ready = warp >= 1;
     ctx.fillStyle = ready ? `hsl(${(now()/6)%360},90%,66%)` : "#8a6aff";
-    if (fillW > 0) roundRect(mx + 2, my + 2, fillW, mh - 4, 4), ctx.fill();
-    txt(ready ? "WARP READY — SHIFT" : "WARP", mx + mw, my + mh + 16, 12,
-        ready ? "#ffffff" : "#7a6aaa", "right");
+    if (fillW > 0) { roundRect(mx + 2, my + 2, fillW, mh - 4, 4); ctx.fill(); }
+    txt(ready ? "WARP READY — SHIFT" : "WARP", mx + mw, my + mh + 16, 12, ready ? "#ffffff" : "#7a6aaa", "right");
 
+    // countdown
+    if (countdown > 0) {
+      const c = Math.ceil(countdown);
+      const frac = countdown - Math.floor(countdown);
+      const scale = 1 + (1 - frac) * 0.6;
+      ctx.save(); ctx.translate(W / 2, H * 0.42); ctx.scale(scale, scale);
+      ctx.globalAlpha = clamp(frac + 0.2, 0, 1);
+      ctx.shadowColor = "#a97bff"; ctx.shadowBlur = 30;
+      txt(c >= 1 ? String(c) : "GO!", 0, 0, 90, "#ffffff", "center");
+      ctx.restore(); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    }
+
+    if (paused) drawPaused();
     if (state === STATE.DEAD) drawDead();
   }
-
   function drawTitle() {
-    const cx = W * 0.5, cy = H * 0.42;
-    const t = now() / 1000;
-    ctx.save();
-    ctx.textAlign = "center";
-    // glowing title
-    ctx.shadowColor = `hsl(${hue},95%,60%)`;
-    ctx.shadowBlur = 30;
+    const cx = W * 0.5, cy = H * 0.42, t = now() / 1000;
+    ctx.save(); ctx.textAlign = "center";
+    ctx.shadowColor = `hsl(${hue},95%,60%)`; ctx.shadowBlur = 30;
     txt("WARP RUSH", cx, cy, Math.min(84, W * 0.16), "#ffffff", "center");
     ctx.shadowBlur = 0;
-    txt("CLAUDE  ×  HIGGSFIELD", cx, cy - Math.min(84, W * 0.16) * 0.7,
-        Math.min(20, W * 0.045), `hsl(${(hue+40)%360},90%,70%)`, "center");
-
+    txt("CLAUDE  ×  HIGGSFIELD", cx, cy - Math.min(84, W * 0.16) * 0.7, Math.min(20, W * 0.045), `hsl(${(hue+40)%360},90%,70%)`, "center");
     const pulse = 0.6 + Math.sin(t * 3) * 0.4;
     ctx.globalAlpha = pulse;
     txt("PRESS  SPACE  /  TAP  TO  START", cx, cy + 60, 20, "#c9b8ff", "center");
     ctx.globalAlpha = 1;
-
-    txt("flip gravity to weave the neon.  grab orbs.  charge WARP.  don't die.",
-        cx, cy + 100, 13, "#6a5a9a", "center");
-    txt("BEST  " + best, cx, cy + 128, 15, "#7a6aaa", "center");
+    txt("flip gravity · grab gold orbs · grab ◈ shields · charge WARP", cx, cy + 98, 13, "#6a5a9a", "center");
+    txt("BEST  " + best, cx, cy + 126, 15, "#7a6aaa", "center");
     ctx.restore();
   }
-
+  function drawPaused() {
+    const cx = W * 0.5, cy = H * 0.44;
+    ctx.save(); ctx.fillStyle = "rgba(5,1,15,0.6)"; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.shadowColor = "#a97bff"; ctx.shadowBlur = 20;
+    txt("PAUSED", cx, cy, 54, "#ffffff", "center"); ctx.shadowBlur = 0;
+    txt("PRESS  P  TO  RESUME", cx, cy + 40, 16, "#c9b8ff", "center");
+    ctx.restore();
+  }
   function drawDead() {
     const cx = W * 0.5, cy = H * 0.42;
-    ctx.save();
-    ctx.fillStyle = "rgba(5,1,15,0.55)";
-    ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.fillStyle = "rgba(5,1,15,0.55)"; ctx.fillRect(0, 0, W, H);
     ctx.textAlign = "center";
     ctx.shadowColor = "#ff3b6b"; ctx.shadowBlur = 24;
-    txt("SYSTEM BREACH", cx, cy, Math.min(56, W * 0.11), "#ff5580", "center");
-    ctx.shadowBlur = 0;
+    txt("SYSTEM BREACH", cx, cy, Math.min(56, W * 0.11), "#ff5580", "center"); ctx.shadowBlur = 0;
     txt("SCORE  " + Math.round(score), cx, cy + 46, 26, "#ffffff", "center");
     const isBest = Math.round(score) >= best && score > 0;
-    txt(isBest ? "★ NEW BEST ★" : "BEST  " + best, cx, cy + 76, 16,
-        isBest ? "#ffd35a" : "#7a6aaa", "center");
+    txt(isBest ? "★ NEW BEST ★" : "BEST  " + best, cx, cy + 76, 16, isBest ? "#ffd35a" : "#7a6aaa", "center");
     const ready = now() - deadAt > 550;
     const pulse = 0.55 + Math.sin(now() / 180) * 0.45;
     ctx.globalAlpha = ready ? pulse : 0.25;
@@ -698,21 +640,14 @@
     ctx.globalAlpha = 1;
     ctx.restore();
   }
-
   function drawScanlines() {
-    ctx.globalAlpha = 0.05;
-    ctx.fillStyle = "#000";
+    ctx.globalAlpha = 0.05; ctx.fillStyle = "#000";
     for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
     ctx.globalAlpha = 1;
-    // vignette
     const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.75);
-    vg.addColorStop(0, "rgba(0,0,0,0)");
-    vg.addColorStop(1, "rgba(0,0,0,0.55)");
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
-
-  // rounded rect path helper (uses current path)
   function roundRect(x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -728,11 +663,9 @@
   let last = now();
   function frame() {
     const t = now();
-    let dt = (t - last) / 1000;
-    last = t;
-    if (dt > 0.05) dt = 0.05; // clamp big gaps
-    update(dt);
-    draw();
+    let dt = (t - last) / 1000; last = t;
+    if (dt > 0.05) dt = 0.05;
+    update(dt); draw();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
